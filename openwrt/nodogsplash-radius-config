@@ -1,0 +1,86 @@
+#!/bin/sh
+# Nodogsplash RADIUS Configuration Script for OpenWrt
+# This script configures Nodogsplash to authenticate against FreeRADIUS server
+
+set -e
+
+echo "Configuring Nodogsplash for RADIUS authentication..."
+
+# Backup existing configuration
+cp /etc/config/nodogsplash /etc/config/nodogsplash.backup.$(date +%Y%m%d_%H%M%S)
+
+# Configure Nodogsplash for RADIUS authentication
+uci set nodogsplash.@instance[0].enabled='1'
+uci set nodogsplash.@instance[0].gateway_interface='br-lan'
+uci set nodogsplash.@instance[0].gateway_address='192.168.1.1'
+uci set nodogsplash.@instance[0].max_clients='250'
+uci set nodogsplash.@instance[0].preauth_idle_timeout='30'
+uci set nodogsplash.@instance[0].auth_idle_timeout='120'
+uci set nodogsplash.@instance[0].session_timeout='1440'  # 24 hours
+uci set nodogsplash.@instance[0].web_root='/etc/nodogsplash/htdocs'
+uci set nodogsplash.@instance[0].gateway_name='WiFly Hotspot'
+
+# RADIUS Authentication Configuration
+uci set nodogsplash.@instance[0].authenticate_immediately='1'
+uci set nodogsplash.@instance[0].radius_auth_server='127.0.0.1:1812'  # Local FreeRADIUS
+uci set nodogsplash.@instance[0].radius_auth_secret='testing123'
+uci set nodogsplash.@instance[0].radius_acct_server='127.0.0.1:1813'  # Accounting
+uci set nodogsplash.@instance[0].radius_acct_secret='testing123'
+
+# Allow access to WiFly portal and payment services before authentication
+uci add_list nodogsplash.@instance[0].authenticated_users='allow tcp port 80 to wifly-portal.com'
+uci add_list nodogsplash.@instance[0].authenticated_users='allow tcp port 443 to wifly-portal.com'
+uci add_list nodogsplash.@instance[0].authenticated_users='allow tcp port 443 to intasend.com'
+uci add_list nodogsplash.@instance[0].authenticated_users='allow tcp port 443 to *.intasend.com'
+uci add_list nodogsplash.@instance[0].authenticated_users='allow tcp port 443 to *.africastalking.com'
+uci add_list nodogsplash.@instance[0].authenticated_users='allow udp port 53'  # DNS
+uci add_list nodogsplash.@instance[0].authenticated_users='allow tcp port 53'  # DNS over TCP
+
+# RADIUS-specific settings
+uci set nodogsplash.@instance[0].radius_realm='wifly'
+uci set nodogsplash.@instance[0].radius_nas_identifier='WiFly-Hotspot'
+uci set nodogsplash.@instance[0].radius_nas_port_type='19'  # Wireless-802.11
+
+# Commit changes
+uci commit nodogsplash
+
+echo "Nodogsplash RADIUS configuration completed."
+
+# Configure firewall to allow RADIUS traffic
+echo "Configuring firewall for RADIUS..."
+
+# Allow RADIUS authentication traffic (UDP 1812)
+uci add firewall rule
+uci set firewall.@rule[-1].name='Allow-RADIUS-Auth'
+uci set firewall.@rule[-1].src='lan'
+uci set firewall.@rule[-1].dest='wan'
+uci set firewall.@rule[-1].dest_port='1812'
+uci set firewall.@rule[-1].proto='udp'
+uci set firewall.@rule[-1].target='ACCEPT'
+
+# Allow RADIUS accounting traffic (UDP 1813)
+uci add firewall rule
+uci set firewall.@rule[-1].name='Allow-RADIUS-Acct'
+uci set firewall.@rule[-1].src='lan'
+uci set firewall.@rule[-1].dest='wan'
+uci set firewall.@rule[-1].dest_port='1813'
+uci set firewall.@rule[-1].proto='udp'
+uci set firewall.@rule[-1].target='ACCEPT'
+
+uci commit firewall
+
+echo "Firewall rules for RADIUS added."
+
+# Restart services
+echo "Restarting services..."
+/etc/init.d/nodogsplash restart
+/etc/init.d/firewall restart
+
+echo ""
+echo "Nodogsplash RADIUS configuration completed successfully!"
+echo ""
+echo "Next steps:"
+echo "1. Ensure FreeRADIUS is running: /etc/init.d/freeradius start"
+echo "2. Test RADIUS connectivity: radtest testuser testpass localhost 0 testing123"
+echo "3. Monitor logs: logread | grep nodogsplash"
+echo "4. Test authentication flow with a connected device"

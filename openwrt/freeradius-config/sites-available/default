@@ -1,0 +1,121 @@
+# Default authentication and authorization site for WiFly hotspot
+# This configuration handles user authentication via PostgreSQL backend
+
+server default {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 1812
+    }
+
+    listen {
+        type = acct
+        ipaddr = *
+        port = 1813
+    }
+
+    # Authorization section
+    authorize {
+        # Check for pre-existing sessions
+        preprocess
+
+        # Check for duplicate users (prevent multiple logins)
+        # Uncomment the following if you want to prevent multiple simultaneous sessions
+        # sql
+        # if (ok) {
+        #     update control {
+        #         Auth-Type := Accept
+        #     }
+        # }
+
+        # Primary authentication via SQL
+        sql
+
+        # Fallback to local files if SQL fails
+        files
+
+        # Set default Auth-Type if not already set
+        if (!control:Auth-Type) {
+            update control {
+                Auth-Type := Accept
+            }
+        }
+
+        # Log authorization attempts
+        auth_log
+
+        # Apply reply attributes
+        sql
+    }
+
+    # Authentication section
+    authenticate {
+        # Use SQL for password verification
+        sql
+
+        # Fallback authentication methods
+        # pap
+        # chap
+        # mschap
+    }
+
+    # Pre-accounting section
+    preacct {
+        preprocess
+
+        # Ensure we have required accounting attributes
+        if (!&Acct-Session-Id) {
+            update request {
+                Acct-Session-Id := "%{randstr:16}"
+            }
+        }
+
+        # Log pre-accounting
+        acct_unique
+
+        # Remove any existing session with same ID
+        sql
+    }
+
+    # Accounting section
+    accounting {
+        # Store accounting data in SQL
+        sql
+
+        # Log accounting events
+        detail
+        unix
+
+        # Execute accounting hooks
+        exec
+
+        # Update reply attributes if needed
+        attr_filter.accounting_response
+    }
+
+    # Post-authentication section
+    post-auth {
+        # Log successful authentications
+        sql
+
+        # Send reply attributes
+        reply_log
+
+        # Execute post-auth scripts
+        exec
+
+        # Update reply with additional attributes if needed
+        Post-Auth-Type REJECT {
+            sql
+            attr_filter.access_reject
+        }
+    }
+
+    # Session section (for CoA - Change of Authorization)
+    session {
+        sql
+    }
+}
+
+# Instantiate the site
+default

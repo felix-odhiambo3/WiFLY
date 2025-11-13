@@ -1,0 +1,128 @@
+# PostgreSQL backend configuration for FreeRADIUS
+# This module connects FreeRADIUS to the PostgreSQL database for user authentication
+
+sql {
+    driver = "rlm_sql_postgresql"
+    dialect = "postgresql"
+
+    # Connection info - adjust these for your PostgreSQL setup
+    server = "localhost"
+    port = 5432
+    login = "radius"
+    password = "radiuspassword"
+    radius_db = "wifly_radius"
+
+    # PostgreSQL specific settings
+    postgresql {
+        # Adjust connection parameters as needed
+        connect_query = "SELECT 1"
+    }
+
+    # SQL queries for authentication
+    authorize_check_query = "\
+        SELECT id, username, attribute, value, op \
+        FROM radcheck \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    authorize_reply_query = "\
+        SELECT id, username, attribute, value, op \
+        FROM radreply \
+        WHERE username = '%{SQL-User-Name}' \
+        ORDER BY id"
+
+    authorize_group_check_query = "\
+        SELECT radgroupcheck.id, radgroupcheck.groupname, \
+               radgroupcheck.attribute, radgroupcheck.value, \
+               radgroupcheck.op \
+        FROM radgroupcheck, radusergroup \
+        WHERE radusergroup.username = '%{SQL-User-Name}' \
+        AND radusergroup.groupname = radgroupcheck.groupname \
+        ORDER BY radgroupcheck.id"
+
+    authorize_group_reply_query = "\
+        SELECT radgroupreply.id, radgroupreply.groupname, \
+               radgroupreply.attribute, radgroupreply.value, \
+               radgroupreply.op \
+        FROM radgroupreply, radusergroup \
+        WHERE radusergroup.username = '%{SQL-User-Name}' \
+        AND radusergroup.groupname = radgroupreply.groupname \
+        ORDER BY radgroupreply.id"
+
+    # Accounting queries
+    accounting_onoff_query = "\
+        UPDATE radacct \
+        SET acctstoptime = (%{integer:Event-Timestamp}::timestamp - interval '1 second'), \
+            acctsessiontime = (%{integer:Event-Timestamp} - acctstarttime::integer), \
+            acctterminatecause = '%{Acct-Terminate-Cause}' \
+        WHERE acctstoptime IS NULL \
+        AND nasipaddress = '%{NAS-IP-Address}' \
+        AND acctstarttime <= %{integer:Event-Timestamp}"
+
+    accounting_update_query = "\
+        UPDATE radacct \
+        SET acctupdatetime = NOW(), \
+            acctinterval = (%{integer:Acct-Session-Time} - acctsessiontime), \
+            acctsessiontime = %{integer:Acct-Session-Time}, \
+            framedipaddress = '%{Framed-IP-Address}', \
+            acctinputoctets = (radacct.acctinputoctets + %{integer:Acct-Input-Octets}), \
+            acctoutputoctets = (radacct.acctoutputoctets + %{integer:Acct-Output-Octets}) \
+        WHERE acctsessionid = '%{Acct-Session-Id}' \
+        AND username = '%{SQL-User-Name}' \
+        AND nasipaddress = '%{NAS-IP-Address}'"
+
+    accounting_start_query = "\
+        INSERT INTO radacct \
+        (acctsessionid, acctuniqueid, username, realm, nasipaddress, \
+         nasporttype, acctstarttime, acctupdatetime, acctsessiontime, \
+         callingstationid, calledstationid, servicetype, framedprotocol, \
+         framedipaddress) \
+        VALUES ('%{Acct-Session-Id}', '%{Acct-Unique-Session-Id}', \
+                '%{SQL-User-Name}', '%{Realm}', '%{NAS-IP-Address}', \
+                '%{NAS-Port-Type}', NOW(), NOW(), 0, \
+                '%{Calling-Station-Id}', '%{Called-Station-Id}', \
+                '%{Service-Type}', '%{Framed-Protocol}', \
+                '%{Framed-IP-Address}')"
+
+    accounting_stop_query = "\
+        UPDATE radacct \
+        SET acctstoptime = NOW(), \
+            acctsessiontime = %{integer:Acct-Session-Time}, \
+            acctinputoctets = %{integer:Acct-Input-Octets}, \
+            acctoutputoctets = %{integer:Acct-Output-Octets}, \
+            acctterminatecause = '%{Acct-Terminate-Cause}', \
+            connectinfo_stop = '%{Connect-Info}' \
+        WHERE acctsessionid = '%{Acct-Session-Id}' \
+        AND username = '%{SQL-User-Name}' \
+        AND nasipaddress = '%{NAS-IP-Address}'"
+
+    # Post-auth logging
+    postauth_query = "\
+        INSERT INTO radpostauth \
+        (username, pass, reply, authdate) \
+        VALUES ('%{User-Name}', '%{User-Password}', '%{reply:Packet-Type}', NOW())"
+
+    # Safe characters for SQL queries
+    safe_characters = "@abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_: /"
+
+    # Default settings
+    pool {
+        start = 5
+        min = 3
+        max = 32
+        spare = 10
+        uses = 0
+        retry_delay = 30
+        lifetime = 0
+        idle_timeout = 60
+    }
+
+    # Read groups from database
+    read_groups = yes
+
+    # Delete stale sessions
+    delete_stale_sessions = yes
+}
+
+# Instantiate the SQL module
+sql

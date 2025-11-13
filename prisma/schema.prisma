@@ -1,0 +1,219 @@
+// Prisma schema for WiFly hotspot management system
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Voucher codes that can be redeemed for Wi-Fi access
+model Voucher {
+  id              Int      @id @default(autoincrement())
+  code            String   @unique
+  duration_minutes Int
+  is_used         Boolean  @default(false)
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  used_at         DateTime? @db.Timestamptz(6)
+  used_by_mac     String?  @db.VarChar(17)
+  sms_sent        Boolean  @default(false)
+  sms_recipient   String?  @db.VarChar(15)
+
+  @@map("vouchers")
+}
+
+// Records of payments made through IntaSend
+model Payment {
+  id             Int      @id @default(autoincrement())
+  transaction_id String   @unique
+  amount         Int
+  currency       String   @default("KES") @db.VarChar(3)
+  status         String   @default("Pending")
+  mac_address    String   @db.VarChar(17)
+  plan_name      String
+  payment_method String   @default("IntaSend")
+  phone_number   String?  @db.VarChar(15)
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+  refunded_at    DateTime? @db.Timestamptz(6)
+  refund_reason  String?
+
+  @@map("payments")
+}
+
+// User sessions for tracking active connections
+model UserSession {
+  id          Int      @id @default(autoincrement())
+  mac         String   @db.VarChar(17)
+  plan        String
+  start_time  DateTime @default(now()) @db.Timestamptz(6)
+  expiry_time DateTime @db.Timestamptz(6)
+  status      String   @default("Active")
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("user_sessions")
+}
+
+// Admin users for dashboard access
+model Admin {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  password_hash String
+  role          String   @default("admin")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  otps      AdminOtp[]
+  sessions  AdminSession[]
+  auditLogs AuditLog[]
+
+  @@map("admins")
+}
+
+// OTP codes for admin email-based authentication
+model AdminOtp {
+  id         Int      @id @default(autoincrement())
+  admin_id   Int
+  otp_hash   String
+  otp_code   String   @db.VarChar(6)
+  expires_at DateTime @db.Timestamptz(6)
+  used       Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  request_ip String   @db.VarChar(45)
+  attempts   Int      @default(0)
+
+  admin Admin @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+
+  @@map("admin_otps")
+}
+
+// Admin sessions for dashboard access
+model AdminSession {
+  id          Int      @id @default(autoincrement())
+  admin_id    Int
+  token_hash  String
+  expires_at  DateTime @db.Timestamptz(6)
+  revoked_at  DateTime? @db.Timestamptz(6)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  last_used_at DateTime @default(now()) @db.Timestamptz(6)
+  client_ip   String   @db.VarChar(45)
+  user_agent  String?
+
+  admin Admin @relation(fields: [admin_id], references: [id], onDelete: Cascade)
+
+  @@map("admin_sessions")
+}
+
+// Audit logs for admin actions
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  admin_id    Int?
+  action      String
+  details     String?
+  ip          String?  @db.VarChar(45)
+  user_agent  String?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  admin Admin? @relation(fields: [admin_id], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+// RADIUS accounting table for session tracking
+model Radacct {
+  radacctid          BigInt   @id @default(autoincrement())
+  acctsessionid      String   @db.VarChar(64)
+  acctuniqueid       String   @unique @db.VarChar(32)
+  username           String   @db.VarChar(64)
+  groupname          String   @db.VarChar(64)
+  realm              String?  @db.VarChar(64)
+  nasipaddress       String   @db.Inet
+  nasportid          String?  @db.VarChar(32)
+  nasporttype        String?  @db.VarChar(32)
+  acctstarttime      DateTime? @db.Timestamptz(6)
+  acctupdatetime     DateTime? @db.Timestamptz(6)
+  acctstoptime       DateTime? @db.Timestamptz(6)
+  acctinterval       Int?
+  acctsessiontime    Int?
+  acctauthentic      String?  @db.VarChar(32)
+  connectinfo_start  String?  @db.VarChar(128)
+  connectinfo_stop   String?  @db.VarChar(128)
+  acctinputoctets    BigInt?
+  acctoutputoctets   BigInt?
+  calledstationid    String   @db.VarChar(48)
+  callingstationid   String   @db.VarChar(48)
+  acctterminatecause String?  @db.VarChar(32)
+  servicetype        String?  @db.VarChar(32)
+  framedprotocol     String?  @db.VarChar(32)
+  framedipaddress    String   @db.Inet
+
+  @@map("radacct")
+}
+
+// RADIUS check attributes for authentication
+model Radcheck {
+  id       Int     @id @default(autoincrement())
+  username String  @db.VarChar(64)
+  attribute String @db.VarChar(64)
+  op       String  @db.VarChar(2)
+  value    String  @db.VarChar(253)
+
+  @@map("radcheck")
+}
+
+// RADIUS reply attributes for authorization
+model Radreply {
+  id       Int     @id @default(autoincrement())
+  username String  @db.VarChar(64)
+  attribute String @db.VarChar(64)
+  op       String  @db.VarChar(2)
+  value    String  @db.VarChar(253)
+
+  @@map("radreply")
+}
+
+// RADIUS group check attributes
+model Radgroupcheck {
+  id       Int     @id @default(autoincrement())
+  groupname String @db.VarChar(64)
+  attribute String @db.VarChar(64)
+  op       String  @db.VarChar(2)
+  value    String  @db.VarChar(253)
+
+  @@map("radgroupcheck")
+}
+
+// RADIUS group reply attributes
+model Radgroupreply {
+  id       Int     @id @default(autoincrement())
+  groupname String @db.VarChar(64)
+  attribute String @db.VarChar(64)
+  op       String  @db.VarChar(2)
+  value    String  @db.VarChar(253)
+
+  @@map("radgroupreply")
+}
+
+// RADIUS user group mappings
+model Radusergroup {
+  id        Int     @id @default(autoincrement())
+  username  String  @db.VarChar(64)
+  groupname String  @db.VarChar(64)
+  priority  Int     @default(1)
+
+  @@map("radusergroup")
+}
+
+// RADIUS NAS (Network Access Server) definitions
+model Nas {
+  id          Int     @id @default(autoincrement())
+  nasname     String  @unique @db.VarChar(128)
+  shortname   String? @db.VarChar(32)
+  type        String  @default("other") @db.VarChar(30)
+  ports       Int?
+  secret      String  @db.VarChar(60)
+  server      String? @db.VarChar(64)
+  community   String? @db.VarChar(50)
+  description String? @db.VarChar(200)
+
+  @@map("nas")
+}
